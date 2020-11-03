@@ -1,18 +1,18 @@
 
 
-
-
+# "python.linting.enabled": false
 from os.path import isfile, join
 import os
 import numpy as np
-from sampling import reconstruct_volume
-from sampling import my_reconstruct_volume
+# from sampling import reconstruct_volume
+# from sampling import my_reconstruct_volume
 from sampling import load_data_trainG
 from sampling import load_data_test
 
 import torch
 import torch.nn as nn
-from HyperDenseNet import *
+# from HyperDenseNet import *
+from model import *
 from medpy.metric.binary import dc,hd
 import argparse
 
@@ -20,10 +20,17 @@ import pdb
 from torch.autograd import Variable
 from progressBar import printProgressBar
 import nibabel as nib
+from metric import SegmentationMetric
+metric=SegmentationMetric(4)
+
 
 def evaluateSegmentation(gt,pred):
     pred = pred.astype(dtype='int')
+    gt=gt.astype(dtype='int')
+    # print(np.unique(pred))
+    # print('pred',pred.shape)
     numClasses = np.unique(gt)
+    # print('gt',numClasses)
 
     dsc = np.zeros((1, len(numClasses) - 1))
 
@@ -31,8 +38,9 @@ def evaluateSegmentation(gt,pred):
         gt_c = np.zeros(gt.shape)
         y_c = np.zeros(gt.shape)
         gt_c[np.where(gt==i_n)]=1
+        # print(gt_c[:,0:18,0:18])
         y_c[np.where(pred==i_n)]=1
-
+        # print(y_c[:,0:18,0:18])
         dsc[0, i_n - 1] = dc(gt_c, y_c)
     return dsc
     
@@ -43,7 +51,7 @@ def numpy_to_var(x):
         torch_tensor = torch_tensor.cuda()
     return Variable(torch_tensor)
     
-def inference(network, moda_n, moda_g, imageNames, epoch, folder_save, number_modalities):
+# def inference(network, moda_n, moda_g, imageNames, epoch, folder_save, number_modalities):
     '''root_dir = './Data/MRBrainS/DataNii/'
     model_dir = 'model'
 
@@ -52,7 +60,7 @@ def inference(network, moda_n, moda_g, imageNames, epoch, folder_save, number_mo
     moda_3 = root_dir + 'Training/T2_FLAIR'
     moda_g = root_dir + 'Training/GT'''
     network.eval()
-    softMax = nn.Softmax()
+    softMax = nn.Softmax(dim=0)
     numClasses = 4
     if torch.cuda.is_available():
         softMax.cuda()
@@ -60,49 +68,59 @@ def inference(network, moda_n, moda_g, imageNames, epoch, folder_save, number_mo
 
     dscAll = np.zeros((len(imageNames), numClasses - 1))  # 1 class is the background!!
     for i_s in range(len(imageNames)):
-        if number_modalities == 2:
-            patch_1, patch_2, patch_g, img_shape = load_data_test(moda_n, moda_g, imageNames[i_s], number_modalities)  # hardcoded to read the first file. Loop this to get all files
-        if number_modalities == 3:
-            patch_1, patch_2, patch_3, patch_g, img_shape = load_data_test([moda_n], moda_g, imageNames[i_s], number_modalities) # hardcoded to read the first file. Loop this to get all files
+        # if number_modalities == 2:
+        #     patch_1, patch_2, patch_g, img_shape = load_data_test(moda_n, moda_g, imageNames[i_s], number_modalities)  # hardcoded to read the first file. Loop this to get all files
+        # if number_modalities == 3:
+        #     patch_1, patch_2, patch_3, patch_g, img_shape = load_data_test(moda_n, moda_g, imageNames[i_s], number_modalities) # hardcoded to read the first file. Loop this to get all files
 
-        patchSize = 27
-        patchSize_gt = 9
+        # patchSize = 27
+        # patchSize_gt = 9
 
-        x = np.zeros((0, number_modalities, patchSize, patchSize, patchSize))
-        x = np.vstack((x, np.zeros((patch_1.shape[0], number_modalities, patchSize, patchSize, patchSize))))#shape(patch_1.shape[0],, number_modalities, patchSize, patchSize, patchSize)
-        x[:, 0, :, :, :] = patch_1
-        x[:, 1, :, :, :] = patch_2
-        if (number_modalities==3):
-            x[:, 2, :, :, :] = patch_3
+        # x = np.zeros((0, number_modalities, patchSize, patchSize, patchSize))
+        # x = np.vstack((x, np.zeros((patch_1.shape[0], number_modalities, patchSize, patchSize, patchSize))))#shape(patch_1.shape[0],, number_modalities, patchSize, patchSize, patchSize)
+        # x[:, 0, :, :, :] = patch_1
+        # x[:, 1, :, :, :] = patch_2
+        # if (number_modalities==3):
+        #     x[:, 2, :, :, :] = patch_3
         
-        pred_numpy = np.zeros((0,numClasses,patchSize_gt,patchSize_gt,patchSize_gt))
-        pred_numpy = np.vstack((pred_numpy, np.zeros((patch_1.shape[0], numClasses, patchSize_gt, patchSize_gt, patchSize_gt))))
-        totalOp = len(imageNames)*patch_1.shape[0]
-        pred = network(numpy_to_var(x[0,:,:,:,:]).view(1,number_modalities,patchSize,patchSize,patchSize))
-        for i_p in range(patch_1.shape[0]):
-            pred = network(numpy_to_var(x[i_p,:,:,:,:].reshape(1,number_modalities,patchSize,patchSize,patchSize)))
+        
+        # pred = network(numpy_to_var(x[0,:,:,:,:]).view(1,number_modalities,patchSize,patchSize,patchSize))
+
+        x_train, y_train, img_shape = load_data_test(moda_n, moda_g, imageNames, 100, number_modalities)
+        pred_numpy = np.zeros((0,numClasses,x_train.shape[2],x_train.shape[3]))
+        pred_numpy = np.vstack((pred_numpy, np.zeros((x_train.shape[0], numClasses, x_train.shape[2],x_train.shape[3]))))
+        totalOp = len(imageNames)*x_train.shape[0]
+        for i_p in range(x_train.shape[0]):
+            # a=x_train[i_p,:,:,:]
+            # b=x_train[i_p,:,:,:].reshape(1,number_modalities,x_train.shape[2],x_train.shape[3])
+            pred = network(numpy_to_var(x_train[i_p,:,:,:].reshape(1,number_modalities,x_train.shape[2],x_train.shape[3])))
+
+            
+
+            # To adapt CE to 3D
+            # LOGITS:
+            #这里没明白
+            
             pred_y = softMax(pred)
-            pred_numpy[i_p,:,:,:,:] = pred_y.cpu().data.numpy()
+            # print(pred_y.numel())
+            # pred_y = pred_y.permute(0,2,3,1).contiguous()#permute是pytorch中的高维转置函数，返回的是张量
+            # pred_y = pred_y.view(pred_y.numel() // numClasses, numClasses)#numel返回数量
+            pred_numpy[i_p,:,:,:] = pred_y.cpu().data.numpy()
 
             printProgressBar(i_s * ((totalOp + 0.0) / len(imageNames)) + i_p + 1, totalOp,
                              prefix="[Validation] ",
                              length=15)
 
         # To reconstruct the predicted volume
-        extraction_step_value = 9
+        # extraction_step_value = 9
         pred_classes = np.argmax(pred_numpy, axis=1)
 
-        pred_classes = pred_classes.reshape((len(pred_classes), patchSize_gt, patchSize_gt, patchSize_gt))
-        #bin_seg = reconstruct_volume(pred_classes, (img_shape[1], img_shape[2], img_shape[3]))
-        bin_seg = my_reconstruct_volume(pred_classes,
-                                        (img_shape[1], img_shape[2], img_shape[3]),
-                                        patch_shape=(27, 27, 27),
-                                        extraction_step=(extraction_step_value, extraction_step_value, extraction_step_value))
+        pred_classes = pred_classes.reshape((len(pred_classes), x_train.shape[2], x_train.shape[3]))
+        pred_classes=pred_classes.transpose(1,2,0)
 
-        bin_seg = bin_seg[:,:,extraction_step_value:img_shape[3]-extraction_step_value]
         gt = nib.load(moda_g + '/' + imageNames[i_s]).get_data()
 
-        img_pred = nib.Nifti1Image(bin_seg, np.eye(4))
+        img_pred = nib.Nifti1Image(pred_classes, np.eye(4))
         img_gt = nib.Nifti1Image(gt, np.eye(4))
 
         img_name = imageNames[i_s].split('.nii')
@@ -118,12 +136,73 @@ def inference(network, moda_n, moda_g, imageNames, epoch, folder_save, number_mo
 
         nib.save(img_pred, folder_save + 'Segmentations/' + name)
         nib.save(img_gt, folder_save + 'GT/' + namegt)
-
-        dsc = evaluateSegmentation(gt,bin_seg)
+        y_train=y_train.transpose(1,2,0)
+        dsc = evaluateSegmentation(y_train,pred_classes)
         dscAll[i_s, :] = dsc
 
     return dscAll
-        
+
+def inference(network, moda_n, moda_g, imageNames, epoch, folder_save, number_modalities):
+    '''root_dir = './Data/MRBrainS/DataNii/'
+    model_dir = 'model'
+
+    moda_1 = root_dir + 'Training/T1'
+    moda_2 = root_dir + 'Training/T1_IR'
+    moda_3 = root_dir + 'Training/T2_FLAIR'
+    moda_g = root_dir + 'Training/GT'''
+    network.eval()
+    softMax = nn.Softmax()
+    numClasses = 4
+    if torch.cuda.is_available():
+        softMax.cuda()
+        network.cuda()
+    accAll = np.zeros((len(imageNames), numClasses ))
+    dscAll = np.zeros((len(imageNames), numClasses - 1))  # 1 class is the background!!
+    for i_s in range(len(imageNames)):
+
+        x_train, y_train, img_shape = load_data_test(moda_n, moda_g, imageNames, 100, number_modalities)
+        pred_numpy = np.zeros((0,numClasses,x_train.shape[2],x_train.shape[3]))
+        pred_numpy = np.vstack((pred_numpy, np.zeros((x_train.shape[0], numClasses, x_train.shape[2],x_train.shape[3]))))
+        totalOp = len(imageNames)*x_train.shape[0]
+        for i_p in range(x_train.shape[0]):
+            pred = network(numpy_to_var(x_train[i_p,:,:,:].reshape(1,number_modalities,x_train.shape[2],x_train.shape[3])))
+
+            
+
+            # To adapt CE to 3D
+            # LOGITS:
+            #这里没明白
+            
+            pred_y = softMax(pred)
+            pred_numpy[i_p,:,:,:] = pred_y.cpu().data.numpy()
+
+            printProgressBar(i_s * ((totalOp + 0.0) / len(imageNames)) + i_p + 1, totalOp,
+                             prefix="[Validation] ",
+                             length=15)
+
+
+    #     segmentation_prediction = hdNet(MRIs)
+            
+    #     predClass_y = softMax(segmentation_prediction)
+    #     # print(predClass_y.shape)
+    #     pred_classes = np.argmax(predClass_y.cpu().data.numpy(), axis=1)
+
+    #     pred_classes = pred_classes.reshape((len(pred_classes), x_train.shape[2], x_train.shape[3]))
+    #     dsc_train = evaluateSegmentation(Segmentation.cpu().data.numpy(),pred_classes)
+    #     metric.addBatch(pred_classes.astype(dtype='int'), Segmentation.cpu().data.numpy().astype(dtype='int'))
+    #     acc = metric.classPixelAccuracy()
+
+        pred_classes = np.argmax(pred_numpy, axis=1)
+
+        pred_classes = pred_classes.reshape((len(pred_classes), x_train.shape[2], x_train.shape[3]))
+        dsc = evaluateSegmentation(y_train,pred_classes)
+        dscAll[i_s, :] = dsc
+        metric.addBatch(pred_classes.astype(dtype='int'), y_train.astype(dtype='int'))
+        acc = metric.classPixelAccuracy()
+        accAll[i_s, :] = acc
+
+    return dscAll,accAll
+
 def runTraining(opts):
     print('' * 41)
     print('~' * 50)
@@ -156,6 +235,7 @@ def runTraining(opts):
     
     root_dir = opts.root_dir
     model_name = opts.modelName
+
 
     if not (len(opts.modality_dirs)== opts.numModal): raise AssertionError
 
@@ -202,9 +282,10 @@ def runTraining(opts):
     # Define HyperDenseNet
     # To-Do. Get as input the config settings to create different networks
     if (opts.numModal == 2):
-        hdNet = HyperDenseNet_2Mod(num_classes)
+        hdNet = MMAN()
     if (opts.numModal == 3):
-        hdNet = HyperDenseNet(num_classes)
+        # hdNet = HyperDenseNet(num_classes)
+        hdNet = MMAN()
     #
 
     '''try:
@@ -228,49 +309,51 @@ def runTraining(opts):
     print(" ~~~~~~~~~~~ Starting the training ~~~~~~~~~~")
     numBatches = int(samplesPerEpoch/batch_size)
     dscAll = []
+    if (opts.numModal == 2):
+        imgPaths = [moda_1, moda_2]
+
+    if (opts.numModal == 3):
+        imgPaths = [moda_1, moda_2, moda_3]
+    x_train, y_train, img_shape = load_data_trainG(imgPaths, moda_g, imageNames_train, samplesPerEpoch, opts.numModal) # hardcoded to read the first file. Loop this to get all files. Karthik
     for e_i in range(epoch):
         hdNet.train()
         
         lossEpoch = []
-
-        if (opts.numModal == 2):
-            imgPaths = [moda_1, moda_2]
-
-        if (opts.numModal == 3):
-            imgPaths = [moda_1, moda_2, moda_3]
-
-        x_train, y_train, img_shape = load_data_trainG(imgPaths, moda_g, imageNames_train, samplesPerEpoch, opts.numModal) # hardcoded to read the first file. Loop this to get all files. Karthik
-        # print('x_train1 shape ', x_train.shape)
-        # print('y_train1 shape ', y_train.shape)
+        
+        aa=x_train[1,:,:,:]
         for b_i in range(numBatches):
             optimizer.zero_grad()#这两句代码的作用是等同的
             hdNet.zero_grad()
             
-            MRIs         = numpy_to_var(x_train[b_i*batch_size:b_i*batch_size+batch_size,:,:,:,:])
-            # print('MRIs',MRIs.shape)
+            MRIs         = numpy_to_var(x_train[b_i*batch_size:b_i*batch_size+batch_size,:,:,:])
 
-            Segmentation = numpy_to_var(y_train[b_i*batch_size:b_i*batch_size+batch_size,:,:,:])
+            Segmentation = numpy_to_var(y_train[b_i*batch_size:b_i*batch_size+batch_size,:,:])
+            # print('Segmentation',Segmentation.size())
 
             segmentation_prediction = hdNet(MRIs)
-            # print('segmentation_prediction',segmentation_prediction.size())#torch.Size([5, 4, 9, 9, 9])
             
             predClass_y = softMax(segmentation_prediction)
+            # print(predClass_y.shape)
+            pred_classes = np.argmax(predClass_y.cpu().data.numpy(), axis=1)
 
+            pred_classes = pred_classes.reshape((len(pred_classes), x_train.shape[2], x_train.shape[3]))
+            dsc_train = evaluateSegmentation(Segmentation.cpu().data.numpy(),pred_classes)
+            metric.addBatch(pred_classes.astype(dtype='int'), Segmentation.cpu().data.numpy().astype(dtype='int'))
+            acc = metric.pixelAccuracy()
+            # acc=metric.pixelAccuracy(Segmentation.cpu().data.numpy(),pred_classes)
             # To adapt CE to 3D
             # LOGITS:
             #这里没明白
-            segmentation_prediction = segmentation_prediction.permute(0,2,3,4,1).contiguous()#permute是pytorch中的高维转置函数，返回的是张量
-            # print('segmentation_prediction size',segmentation_prediction.size())#size torch.Size([5, 9, 9, 9, 4])
+            segmentation_prediction = segmentation_prediction.permute(0,2,3,1).contiguous()#permute是pytorch中的高维转置函数，返回的是张量
             segmentation_prediction = segmentation_prediction.view(segmentation_prediction.numel() // num_classes, num_classes)#numel返回数量
-            #print('segmentation_prediction number',segmentation_prediction.numel())#14580
-            #print('segmentation_prediction size new', segmentation_prediction.size())#torch.Size([3645, 4])
             CE_loss_batch = CE_loss(segmentation_prediction, Segmentation.view(-1).type(torch.cuda.LongTensor))
-            #print('Segmentation.view(-1)',Segmentation.view(-1).size())#3645
             loss = CE_loss_batch
             loss.backward()
 
             optimizer.step()
             lossEpoch.append(CE_loss_batch.cpu().data.numpy())
+            # print('dsc_train',dsc_train)
+            # print('acc',acc)
 
             printProgressBar(b_i + 1, numBatches,
                              prefix="[Training] Epoch: {} ".format(e_i),
@@ -286,20 +369,19 @@ def runTraining(opts):
 
         np.save(os.path.join(model_name, model_name + '_loss.npy'), lossEpoch)
 
-        print(' Epoch: {}, loss: {}'.format(e_i,np.mean(lossEpoch)))
+        print(' Epoch: {}, loss: {}, dsc_train: {}'.format(e_i,np.mean(lossEpoch),dsc_train))
 
-        if (e_i%10)==0:
+        if (e_i%1)==0:
 
             if (opts.numModal == 2):
                 moda_n = [moda_1_val, moda_2_val]
             if (opts.numModal == 3):
                 moda_n = [moda_1_val, moda_2_val, moda_3_val]
-
-            dsc = inference(hdNet,moda_n, moda_g_val, imageNames_val,e_i, opts.save_dir,opts.numModal)
-
+            # dsc = inference(hdNet,moda_n, moda_g_val, imageNames_val,e_i, opts.save_dir,opts.numModal)
+            dsc,acc = inference(hdNet,moda_n, moda_g_val, imageNames_val,e_i, opts.save_dir,opts.numModal)
             dscAll.append(dsc)
 
-            print(' Metrics: DSC(mean): {} per class: 1({}) 2({}) 3({})'.format(np.mean(dsc),dsc[0][0],dsc[0][1],dsc[0][2]))
+            print(' Metrics: DSC(mean): {} per class: 1({}) 2({}) 3({}), acc(mean): {} per class: 1({}) 2({}) 3({})'.format(np.mean(dsc),dsc[0][0],dsc[0][1],dsc[0][2],np.mean(acc),acc[0][1],acc[0][2],acc[0][3]))
             if not os.path.exists(model_name):
                 os.makedirs(model_name)
 
@@ -318,19 +400,20 @@ def runTraining(opts):
              for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
                         
-            
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--root_dir', type=str, default='./Data/MRBrainS/DataNii/', help='directory containing the train and val folders')
-    parser.add_argument('--modality_dirs', nargs='+', default=['T1','T2_FLAIR'], help='subdirectories containing the multiple modalities')
-    parser.add_argument('--save_dir', type=str, default='./Results/', help='directory ot save results')
-    parser.add_argument('--modelName', type=str, default='HyperDenseNet_2Mod', help='name of the model')
-    parser.add_argument('--numModal', type=int, default=2, help='Number of image modalities')
+    parser.add_argument('--modality_dirs', nargs='+', default=['T1','T2_FLAIR','T1_IR'], help='subdirectories containing the multiple modalities')
+    parser.add_argument('--save_dir', type=str, default='./Results_10000_100/', help='directory ot save results')
+    parser.add_argument('--modelName', type=str, default='HyperDenseNet_3Mod', help='name of the model')
+    parser.add_argument('--numModal', type=int, default=3, help='Number of image modalities')
     parser.add_argument('--numClasses', type=int, default=4, help='Number of classes (Including background)')
-    parser.add_argument('--numSamplesEpoch', type=int, default=1000, help='Number of samples per epoch')
+    parser.add_argument('--numSamplesEpoch', type=int, default=192, help='Number of samples per epoch')
     parser.add_argument('--numEpochs', type=int, default=200, help='Number of epochs')
-    parser.add_argument('--batchSize', type=int, default=5, help='Batch size')
-    parser.add_argument('--l_rate', type=float, default=0.0002, help='Learning rate')
+    parser.add_argument('--batchSize', type=int, default=2, help='Batch size')
+    parser.add_argument('--l_rate', type=float, default=0.02, help='Learning rate')
 
     opts = parser.parse_args()
     print(opts)

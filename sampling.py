@@ -3,63 +3,15 @@ import nibabel as nib
 from sklearn.feature_extraction.image import extract_patches as sk_extract_patches
 import pdb
 import itertools
-
-def generate_indexes(patch_shape, expected_shape) :
-    ndims = len(patch_shape)
-
-    #poss_shape = [patch_shape[i+1] * (expected_shape[i] // patch_shape[i+1]) for i in range(ndims-1)]
-
-    pad_shape = (9, 9, 3)
-    poss_shape = [patch_shape[i + 1] * ((expected_shape[i] - pad_shape[i] * 2) // patch_shape[i + 1]) + pad_shape[i] * 2 for i in range(ndims - 1)]
-
-    #idxs = [range(patch_shape[i+1], poss_shape[i] - patch_shape[i+1], patch_shape[i+1]) for i in range(ndims-1)]
-    idxs = [range(pad_shape[i], poss_shape[i] - pad_shape[i], patch_shape[i + 1]) for i in range(ndims - 1)]
-    #pdb.set_trace()
-    return itertools.product(*idxs)
-
-  #重新取样
-def extract_patches(volume, patch_shape, extraction_step) :
-    #patches = sk_extract_patches(
-    #    volume,
-    #    patch_shape=patch_shape,
-    #    extraction_step=extraction_step)
-
-    #ndim = len(volume.shape)
-    #npatches = np.prod(patches.shape[:ndim])
-
-    #numPatches = 0
-    patchesList = []
-    #相当于从一个长方体中有重叠的截取一部分数据，放到patchList中
-    for x_i in range(0,volume.shape[0]-patch_shape[0],extraction_step[0]):
-        for y_i in range(0,volume.shape[1]-patch_shape[1],extraction_step[1]):
-            for z_i in range(0,volume.shape[2]-patch_shape[2],extraction_step[2]):
-                #print('{}:{} to {}:{} to {}:{}'.format(x_i,x_i+patch_shape[0],y_i,y_i+patch_shape[1],z_i,z_i+patch_shape[2]))
-                #patchesList如果变成矩阵就是（9245，27，27，27），但是这个的问题是将三维方向的联系太紧密，反而二维图像方面的联系却没有了
-                patchesList.append(volume[x_i:x_i + patch_shape[0],
-                                          y_i:y_i + patch_shape[1],
-                                          z_i:z_i + patch_shape[2]])
-
-    #pdb.set_trace()
-    #print('patches',np.array(patchesList).shape)#patches (9245, 27, 27, 27)
-
-    patches = np.concatenate(patchesList, axis=0)
-    #return patches.reshape((npatches, ) + patch_shape)
-    return patches.reshape((len(patchesList), ) + patch_shape)
-
-# Double check that number of labels is continuous
-def get_one_hot(targets, nb_classes):
-    #return np.eye(nb_classes)[np.array(targets).reshape(-1)]
-    return np.swapaxes(np.eye(nb_classes)[np.array(targets)],0,3) # Jose. To have the same shape as pytorch (batch_size, numclasses,x,y,z)
+import os
+from PIL import Image
 
 
-#重新取样和舍弃全0后的数组（及舍弃只有背景的部分）
+
+
+#读取每个nii文件，并将其切割为一张张图片
 def build_set(imageData, numModalities) :
     num_classes = 4
-    patch_shape = (27, 27, 27)
-    extraction_step=(5, 5, 5)
-    #extraction_step=(9, 9, 3)
-    label_selector = [slice(None)] + [slice(9, 18) for i in range(3)]
-   # [slice(None, None, None),slice(9, 18, None),slice(9, 18, None),slice(9, 18, None)]
     # Extract patches from input volumes and ground truth
     imageData_1 = np.squeeze(imageData[0,:,:,:])
     imageData_2 = np.squeeze(imageData[1,:,:,:])
@@ -68,265 +20,155 @@ def build_set(imageData, numModalities) :
         imageData_g = np.squeeze(imageData[3,:,:,:])
     if (numModalities == 2):
         imageData_g = np.squeeze(imageData[2, :, :, :])#将所有的一维移除掉，比如这里就变成240，240，48（从四维变成了三维）
-
-    # num_classes = len(np.unique(imageData_g))
-    # print("the imageData_g unique is ",len(np.unique(imageData_g)))
-    x = np.zeros((0, numModalities, 27, 27, 27))
-    y = np.zeros((0, 9, 9, 9))
-
-    #for idx in range(len(imageData)) :
-    y_length = len(y)#值为0
-
-    label_patches = extract_patches(imageData_g, patch_shape, extraction_step)#返回的是重新取样过后的数组
-    #print('label',label_patches.shape)#label (9245, 27, 27, 27)
-    label_patches = label_patches[label_selector]#只取每维数组9—18中间的数，这里label_patches大小为（9245, 9, 9, 9)
-    #感觉这样取会丢失部分信息
-    # Select only those who are important for processing
-    valid_idxs = np.where(np.sum(label_patches, axis=(1, 2, 3)) != 0)
-
-    # Filtering extracted patches
-    label_patches = label_patches[valid_idxs]
-
-    x = np.vstack((x, np.zeros((len(label_patches), numModalities, 27, 27, 27))))
-    y = np.vstack((y, np.zeros((len(label_patches), 9, 9, 9))))  # Jose
-
-    y = label_patches
-    del label_patches
-    
-    # Sampling strategy: reject samples which labels are only zeros
-    T1_train = extract_patches(imageData_1, patch_shape, extraction_step)
-    x[y_length:, 0, :, :, :] = T1_train[valid_idxs]
-    del T1_train
-
-    # Sampling strategy: reject samples which labels are only zeros
-    T2_train = extract_patches(imageData_2, patch_shape, extraction_step)
-    x[y_length:, 1, :, :, :] = T2_train[valid_idxs]
-    del T2_train
-
+    patchesList_1 = []
+    for i in range(imageData_1.shape[2]):
+        patchesList_1.append(imageData_1[:,:,i])
+    patchesList_2 = []
+    for i in range(imageData_2.shape[2]):
+        patchesList_2.append(imageData_2[:,:,i])
+    patchesList_3 = []
     if (numModalities==3):
-        # Sampling strategy: reject samples which labels are only zeros
-        Fl_train = extract_patches(imageData_3, patch_shape, extraction_step)
-        x[y_length:, 2, :, :, :] = Fl_train[valid_idxs]
-        del Fl_train
-    # print('X shape is:',x.shape)
-    # print('y shape is:', y.shape)
-    return x, y
+        for i in range(imageData_3.shape[2]):
+            patchesList_3.append(imageData_3[:,:,i])
+    patchesList_g = []
+    for i in range(imageData_2.shape[2]):
+        patchesList_g.append(imageData_g[:,:,i])
+    if (numModalities==3):
 
-def reconstruct_volume(patches, expected_shape) :
-    patch_shape = patches.shape
+        return np.array(patchesList_1),np.array(patchesList_2),np.array(patchesList_3),np.array(patchesList_g)
+    if (numModalities==2):
 
-    assert len(patch_shape) - 1 == len(expected_shape)
-
-    reconstructed_img = np.zeros(expected_shape)
-
-    for count, coord in enumerate(generate_indexes(patch_shape, expected_shape)) :
-        selection = [slice(coord[i], coord[i] + patch_shape[i+1]) for i in range(len(coord))]
-        #pdb.set_trace()
-        reconstructed_img[selection] = patches[count]
-
-    return reconstructed_img
-
-def my_reconstruct_volume(patches, expected_shape, patch_shape, extraction_step) :
-    reconstructed_img = np.zeros(expected_shape)
-    idx = 0
-    #pdb.set_trace()
-    for x_i in range(0,expected_shape[0]-patch_shape[0],extraction_step[0]):
-        for y_i in range(0,expected_shape[1]-patch_shape[1],extraction_step[1]):
-            for z_i in range(0,expected_shape[2]-patch_shape[2],extraction_step[2]):
-                #pdb.set_trace()#0-9全是背景0，所以即使不填充也没有关系
-                reconstructed_img[(x_i + extraction_step[0]):(x_i + 2 * extraction_step[0]),
-                                  (y_i + extraction_step[1]):(y_i + 2 * extraction_step[1]),
-                                  (z_i + extraction_step[2]):(z_i + 2 * extraction_step[2])] = patches[idx]
-
-                #reconstructed_img[(x_i + extraction_step[0]):(x_i + 2 * extraction_step[0]),
-                #                  (y_i + extraction_step[1]):(y_i + 2 * extraction_step[1]),
-                #                  (z_i ):(z_i + extraction_step[2])] = patches[idx]
-                idx = idx + 1
-
-    return reconstructed_img
+        return np.array(patchesList_1),np.array(patchesList_2),np.array(patchesList_g)
 
 
+##读取训练数据
 def load_data_trainG(paths, pathg, imageNames, numSamples, numModalities):
     samplesPerImage = int(numSamples / len(imageNames))
-    # print(' - Extracting {} samples per image'.format(samplesPerImage))
-    X_train = []
+    X1_train = []
+    X2_train = []
+    X3_train = []
     Y_train = []
-#linux
     for num in range(len(imageNames)):
-        imageData_1 = nib.load(paths[0] + '/' + imageNames[num]).get_data()
-        imageData_1.transpose(2,0,1)
-        imageData_2 = nib.load(paths[1] + '/' + imageNames[num]).get_data()
-        imageData_2.transpose(2, 0, 1)
+        imageData_1 = nib.load(paths[0] + os.sep + imageNames[num]).get_data()
+        imageData_2 = nib.load(paths[1] + os.sep  + imageNames[num]).get_data()
         if (numModalities==3):
-            imageData_3 = nib.load(paths[2] + '/' + imageNames[num]).get_data()
-            imageData_3.transpose(2, 0, 1)
-        imageData_g = nib.load(pathg + '/' + imageNames[num]).get_data()
-        imageData_g.transpose(2, 0, 1)
-    #windows
-    # for num in range(len(imageNames)):
-    #     imageData_1 = nib.load(paths[0] + '\\' + imageNames[num]).get_data()
-    #     imageData_2 = nib.load(paths[1] + '\\' + imageNames[num]).get_data()
-    #     if (numModalities==3):
-    #         imageData_3 = nib.load(paths[2] + '\\' + imageNames[num]).get_data()
-    #     imageData_g = nib.load(pathg + '\\' + imageNames[num]).get_data()
+            imageData_3 = nib.load(paths[2] +os.sep  + imageNames[num]).get_data()
+        imageData_g = nib.load(pathg + os.sep  + imageNames[num]).get_data()
+
+        # #CLAHE
+        # imageData_1 = nib.load(paths[0] + os.sep + imageNames[num]).get_data()[:,:,:,0]
+        # imageData_2 = nib.load(paths[1] + os.sep  + imageNames[num]).get_data()[:,:,:,0]
+        # if (numModalities==3):
+        #     imageData_3 = nib.load(paths[2] +os.sep  + imageNames[num]).get_data()[:,:,:,0]
+        # imageData_g = nib.load(pathg + os.sep  + imageNames[num]).get_data()
 
         num_classes = len(np.unique(imageData_g))
 
         if (numModalities == 2):
             imageData = np.stack((imageData_1, imageData_2, imageData_g))
+            patchesList_1,patchesList_2,patchesList_g = build_set(imageData, numModalities)
         if (numModalities == 3):
             imageData = np.stack((imageData_1, imageData_2, imageData_3, imageData_g))
+            patchesList_1,patchesList_2,patchesList_3,patchesList_g = build_set(imageData, numModalities)
 
         img_shape = imageData.shape
-        # print('img_shape',img_shape)
-        x_train, y_train = build_set(imageData, numModalities)#至此为止，nii文件被重新取样，没有随机打乱顺序
-        # print('x_train shape ',x_train.shape)
-        # print('y_train shape ', y_train.shape)
         #接下来开始打乱顺序
-        idx = np.arange(x_train.shape[0])
+        idx = np.arange(patchesList_1.shape[0])
         np.random.shuffle(idx)
+        patchesList_1=patchesList_1[idx,]
+        patchesList_2=patchesList_2[idx,]            
+        X1_train.append(patchesList_1)
+        X2_train.append(patchesList_2)
 
-        x_train = x_train[idx[:samplesPerImage],]
-        y_train = y_train[idx[:samplesPerImage],]
-        # print('x_train shape ',x_train.shape)
-        # print('y_train shape ', y_train.shape)
-        X_train.append(x_train)
-        Y_train.append(y_train)
-
-        del x_train
-        del y_train
-
-    X_train = np.asarray(X_train)
-    Y_train = np.asarray(Y_train)
-    # print('X_train shape ', X_train.shape)
-    # print('Y_train shape ', Y_train.shape)
-    X = np.concatenate(X_train, axis=0)
-    del X_train
-
-    Y = np.concatenate(Y_train, axis=0)
-    del Y_train
-
-    idx = np.arange(X.shape[0])
+        if (numModalities == 3):
+            patchesList_3=patchesList_3[idx,]
+            X3_train.append(patchesList_3)
+        patchesList_g=patchesList_g[idx,]
+        Y_train.append(patchesList_g)
+        
+        del patchesList_1
+        del patchesList_2
+        del patchesList_3
+        del patchesList_g
+    X1_train=np.array(X1_train)
+    X2_train=np.array(X2_train)
+    
+    X1_train=X1_train.reshape(X1_train.shape[0]*X1_train.shape[1],X1_train.shape[2],X1_train.shape[3])
+    X2_train=X2_train.reshape(X2_train.shape[0]*X2_train.shape[1],X2_train.shape[2],X2_train.shape[3])
+    idx = np.arange(X1_train.shape[0])
     np.random.shuffle(idx)
+    if (numModalities == 2):
+        X_train=np.stack((X1_train[idx],X2_train[idx]))
+    if (numModalities == 3):
+        X3_train=np.array(X3_train)
+        X3_train=X3_train.reshape(X3_train.shape[0]*X3_train.shape[1],X3_train.shape[2],X3_train.shape[3])
+        X_train=np.stack((X1_train[idx],X2_train[idx],X3_train[idx]))
+    Y_train=np.array(Y_train)
+    Y_train=Y_train.reshape(Y_train.shape[0]*Y_train.shape[1],Y_train.shape[2],Y_train.shape[3])
+    Y_train=Y_train[idx]
+    return X_train.transpose(1,0,2,3), Y_train, img_shape
 
-    return X[idx], Y[idx], img_shape
 
-def load_data_train(path1, path2, path3, pathg, imageNames, numSamples):
 
-    samplesPerImage = int(numSamples/len(imageNames))
-
-    X_train = []
+#读取验证集数据
+def load_data_test(paths, pathg, imageNames, numSamples, numModalities):
+    samplesPerImage = int(numSamples / len(imageNames))
+    X1_train = []
+    X2_train = []
+    X3_train = []
     Y_train = []
-  
     for num in range(len(imageNames)):
-        imageData_1 = nib.load(path1 + '/' + imageNames[num]).get_data()
-        imageData_2 = nib.load(path2 + '/' + imageNames[num]).get_data()
-        imageData_3 = nib.load(path3 + '/' + imageNames[num]).get_data()
-        imageData_g = nib.load(pathg + '/' + imageNames[num]).get_data()
-        # imageData_1 = nib.load(path1 + '\\' + imageNames[num]).get_data()
-        # imageData_2 = nib.load(path2 + '\\' + imageNames[num]).get_data()
-        # imageData_3 = nib.load(path3 + '\\' + imageNames[num]).get_data()
-        # imageData_g = nib.load(pathg + '\\' + imageNames[num]).get_data()
+        imageData_1 = nib.load(paths[0] + os.sep + imageNames[num]).get_data()
+        imageData_2 = nib.load(paths[1] + os.sep  + imageNames[num]).get_data()
+        if (numModalities==3):
+            imageData_3 = nib.load(paths[2] +os.sep  + imageNames[num]).get_data()
+        imageData_g = nib.load(pathg + os.sep  + imageNames[num]).get_data()
+
+        # imageData_1 = nib.load(paths[0] + os.sep + imageNames[num]).get_data()[:,:,:,0]
+        # imageData_2 = nib.load(paths[1] + os.sep  + imageNames[num]).get_data()[:,:,:,0]
+        # if (numModalities==3):
+        #     imageData_3 = nib.load(paths[2] +os.sep  + imageNames[num]).get_data()[:,:,:,0]
+        # imageData_g = nib.load(pathg + os.sep  + imageNames[num]).get_data()
+
         num_classes = len(np.unique(imageData_g))
 
-        imageData = np.stack((imageData_1, imageData_2, imageData_3, imageData_g))
+        if (numModalities == 2):
+            imageData = np.stack((imageData_1, imageData_2, imageData_g))
+            patchesList_1,patchesList_2,patchesList_g = build_set(imageData, numModalities)
+        if (numModalities == 3):
+            imageData = np.stack((imageData_1, imageData_2, imageData_3, imageData_g))
+            patchesList_1,patchesList_2,patchesList_3,patchesList_g = build_set(imageData, numModalities)
+
         img_shape = imageData.shape
 
-        x_train, y_train = build_set(imageData)
-        idx = np.arange(x_train.shape[0])
-        np.random.shuffle(idx)
+        patchesList_1=patchesList_1
+        patchesList_2=patchesList_2           
+        X1_train.append(patchesList_1)
+        X2_train.append(patchesList_2)
 
-        x_train = x_train[idx[:samplesPerImage],]
-        y_train = y_train[idx[:samplesPerImage],]
+        if (numModalities == 3):
+            patchesList_3=patchesList_3
+            X3_train.append(patchesList_3)
+        patchesList_g=patchesList_g
+        Y_train.append(patchesList_g)
+        
+        del patchesList_1
+        del patchesList_2
+        del patchesList_3
+        del patchesList_g
+    X1_train=np.array(X1_train)
+    X2_train=np.array(X2_train)
+    
+    X1_train=X1_train.reshape(X1_train.shape[0]*X1_train.shape[1],X1_train.shape[2],X1_train.shape[3])
+    X2_train=X2_train.reshape(X2_train.shape[0]*X2_train.shape[1],X2_train.shape[2],X2_train.shape[3])
 
-        X_train.append(x_train)
-        Y_train.append(y_train)
-
-        del x_train
-        del y_train
-
-    X_train = np.asarray(X_train)
-    Y_train = np.asarray(Y_train)
-
-    X = np.concatenate(X_train, axis=0)
-    del X_train
-
-    Y = np.concatenate(Y_train, axis=0)
-    del Y_train
-
-    idx = np.arange(X.shape[0])
-    np.random.shuffle(idx)
-
-    return X[idx], Y[idx], img_shape
-
-
-def load_data_test(path_n, pathg, imgName, number_modalities):
-
-    extraction_step_value = 9
-    imageData_1 = nib.load(path_n[0] + '/' + imgName).get_data()
-    imageData_1.transpose(2, 0, 1)
-    imageData_2 = nib.load(path_n[1] + '/' + imgName).get_data()
-    imageData_2.transpose(2, 0, 1)
-    if number_modalities==3 :
-        imageData_3 = nib.load(path_n[2] + '/' + imgName).get_data()
-        imageData_3.transpose(2, 0, 1)
-
-    imageData_g = nib.load(pathg + '/' + imgName).get_data()
-    imageData_g.transpose(2, 0, 1)
-    # imageData_1 = nib.load(path_n[0] + '\\' + imgName).get_data()
-    # imageData_2 = nib.load(path_n[1] + '\\' + imgName).get_data()
-    # if number_modalities == 3:
-    #     imageData_3 = nib.load(path_n[2] + '\\' + imgName).get_data()
-    #
-    # imageData_g = nib.load(pathg + '\\' + imgName).get_data()
-
-    # imageData_1_new = np.zeros((imageData_1.shape[0],imageData_1.shape[1], imageData_1.shape[2] + 2*extraction_step_value))
-    # imageData_2_new = np.zeros((imageData_1.shape[0],imageData_1.shape[1], imageData_1.shape[2] +2* extraction_step_value))
-    # if number_modalities == 3:
-    #     imageData_3_new = np.zeros((imageData_1.shape[0],imageData_1.shape[1], imageData_1.shape[2] + 2*extraction_step_value))
-    #
-    # imageData_g_new = np.zeros((imageData_1.shape[0],imageData_1.shape[1], imageData_1.shape[2] + 2*extraction_step_value))
-    #
-    # imageData_1_new[:,:,extraction_step_value:extraction_step_value+imageData_1.shape[2]] = imageData_1
-    # imageData_2_new[:,:,extraction_step_value:extraction_step_value+imageData_2.shape[2]] = imageData_2
-
-    imageData_1_new = np.zeros(
-        (imageData_1.shape[0]+ 2 * extraction_step_value, imageData_1.shape[1], imageData_1.shape[2] ))
-    imageData_2_new = np.zeros(
-        (imageData_1.shape[0]+ 2 * extraction_step_value, imageData_1.shape[1], imageData_1.shape[2] ))
-    if number_modalities == 3:
-        imageData_3_new = np.zeros(
-            (imageData_1.shape[0]+ 2 * extraction_step_value, imageData_1.shape[1], imageData_1.shape[2] ))
-
-    imageData_g_new = np.zeros(
-        (imageData_1.shape[0]+ 2 * extraction_step_value, imageData_1.shape[1], imageData_1.shape[2] ))
-
-    imageData_1_new[extraction_step_value:extraction_step_value + imageData_1.shape[0],:, : ] = imageData_1
-    imageData_2_new[ extraction_step_value:extraction_step_value + imageData_2.shape[0],:, :] = imageData_2
-    # print('imageData_1_new',imageData_1_new.shape)
-    if number_modalities == 3:
-        imageData_3_new[extraction_step_value:extraction_step_value+imageData_3.shape[0]:,:] = imageData_3
-
-    imageData_g_new[extraction_step_value:extraction_step_value+imageData_g.shape[0]:,:] = imageData_g
-
-    num_classes = len(np.unique(imageData_g))
-
-    if number_modalities == 2:
-        imageData = np.stack((imageData_1_new, imageData_2_new, imageData_g_new))
-
-    if number_modalities == 3:
-        imageData = np.stack((imageData_1_new, imageData_2_new, imageData_3_new, imageData_g_new))
-    img_shape = imageData.shape
-
-    patch_1 = extract_patches(imageData_1_new, patch_shape=(27, 27, 27), extraction_step=(9, 9, 9))
-    patch_2 = extract_patches(imageData_2_new, patch_shape=(27, 27, 27), extraction_step=(9, 9, 9))
-    #print('patch_1', patch_1.shape)
-    if number_modalities == 3:
-        patch_3 = extract_patches(imageData_3_new, patch_shape=(27, 27, 27), extraction_step=(9, 9, 9))
-    patch_g = extract_patches(imageData_g_new, patch_shape=(27, 27, 27), extraction_step=(9, 9, 9))
-
-    if number_modalities==2 :
-        return patch_1, patch_2, patch_g, img_shape
-
-    if number_modalities==3 :
-        return patch_1, patch_2, patch_3, patch_g, img_shape
+    if (numModalities == 2):
+        X_train=np.stack((X1_train,X2_train))
+    if (numModalities == 3):
+        X3_train=np.array(X3_train)
+        X3_train=X3_train.reshape(X3_train.shape[0]*X3_train.shape[1],X3_train.shape[2],X3_train.shape[3])
+        X_train=np.stack((X1_train,X2_train,X3_train))
+    Y_train=np.array(Y_train)
+    Y_train=Y_train.reshape(Y_train.shape[0]*Y_train.shape[1],Y_train.shape[2],Y_train.shape[3])
+    Y_train=Y_train
+    return X_train.transpose(1,0,2,3), Y_train, img_shape

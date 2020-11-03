@@ -2,11 +2,11 @@ import numpy as np
 import pdb
 import sys
 import matplotlib.pyplot as plt
-
+import os
 def loadMetrics(folderName):
     # Loss
-    loss = np.load(folderName + '\\'+folderName+'_loss.npy')
-    dice = np.load(folderName + '\\'+folderName+'_DSCs.npy')
+    loss = np.load(folderName + os.sep+folderName+'_loss.npy')
+    dice = np.load(folderName + os.sep+folderName+'_DSCs.npy')
 
 
     # Dice training
@@ -14,6 +14,26 @@ def loadMetrics(folderName):
     
     return loss,dice
 
+def save_result(result1,result2, result_type, save_path, record):
+    x = np.arange(0, len(result1))
+    # y = np.array(result1)
+    y1 = np.array(result1)
+    y2 = np.array(result2)
+    # y1 = y[:, 0]
+    # y2 = y[:, 1]
+    plt.plot(x, y1, color="r", marker="o")
+    plt.plot(x, y2, color="b", marker="*")
+    plt.xlabel("epoch(s)")
+    if result_type == "loss":
+        plt.ylabel("loss")
+    elif result_type == "acc":
+        plt.ylabel("acc")
+    else:
+        raise ValueError('Not support result_type')
+    plt.legend(["%s_train" % result_type, "%s_test" % result_type])
+    plt.savefig("%s/%s_%s" % (save_path, record, result_type), dpi=120)
+    plt.close()
+    # plt.show()
 
 def plot1Models(modelNames):
     model1Name = modelNames[0]
@@ -40,7 +60,7 @@ def plot1Models(modelNames):
     # Training Dice
     # plt.subplot(212)
 
-    plt.plot(xAxis, DSC1[0:lim].mean(axis=2), 'r-', label=model1Name, linewidth=2)
+    # plt.plot(xAxis, DSC1[0:lim].mean(axis=2), 'r-', label=model1Name, linewidth=2)
     plt.plot(xAxis, loss1[0:lim].mean(axis=2), 'b.', label=model1Name, linewidth=2)
     legend = plt.legend(loc='lower center', shadow=True, fontsize='large')
     # legend = plt.legend(loc='lower center', shadow=True, fontsize='large')

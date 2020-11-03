@@ -1,17 +1,15 @@
-# Hyperdensenet_Pytorch
+# MMAN_Pytorch
 
 
-This is a Pytorch implementation of Hyperdensenet. For the detailed architecture please refer to the original paper: [link](https://arxiv.org/abs/1804.02967)
+This is a Pytorch implementation of MMAN. For the detailed architecture please refer to the original paper: [link](https://doi.org/10.1016/j.neucom.2019.05.025)
 
-This is not the original implementation of the paper (Do not use it to reproduce the results). The original code is based on Theano and can be found [here](https://github.com/josedolz/HyperDenseNet)
 
-### Design of the Proposed Model
-![model](images/model.png)
+
 
 ### Dependencies
 This code depends on the following libraries:
 
-- Python >= 3.5
+- Python == 3.7
 - Pytorch 0.3.1 (Testing on more recent versions)
 - nibabel
 - medpy
@@ -21,7 +19,7 @@ This code depends on the following libraries:
 
 The model can be trained using below command:  
 ```
-python mainHyperDenseNet.py
+python mainMMAN.py
 ```
 
 ## Preparing your data
@@ -42,8 +40,4 @@ where n is the number of modalities.
 - We are working on adding an external testing function.
 - In the original paper we used a ROI to mask out the background. This will help during sampling patches for training, as well as remove outliers on the testing images, since the receptive field of this network is small.
 
-If you use this code in your research, please consider citing the following paper:
 
-Dolz J, Gopinath K, Yuan J, Lombaert H, Desrosiers C, Ayed IB. HyperDense-Net: A hyper-densely connected CNN for multi-modal image segmentation. IEEE transactions on medical imaging. 2018 Oct 30;38(5):1116-26.
-
-# HyperDenseNet_pytorch
